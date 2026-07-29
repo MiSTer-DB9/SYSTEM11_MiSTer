@@ -1,0 +1,12 @@
+# Quartus-generated build state
+source/db/
+source/incremental_db/
+source/output_files/
+source/jtag.cdf
+source/*.qws
+source/c5_pin_model_dump.txt
+
+# Simulator-generated work libraries and transcripts
+source/sim/work/
+source/sim/transcript
+source/sim/vsim.wlf
