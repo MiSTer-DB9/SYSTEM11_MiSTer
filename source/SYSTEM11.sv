@@ -375,13 +375,15 @@ parameter CONF_STR = {
 	"P2,DIP Switches;",
 	"P2O[96],DIP1 Test,Off,On;",
 	"P2O[97],DIP2 Freeze,Off,On;",
+	"P5,Controllers;",
+	"P5O[48:45],P1 Input,Digital,Analog,GunCon,neGcon,JogCon,Wheel,Mouse,SNAC Port 1,Off;",
+	"P5O[52:49],P2 Input,Digital,Analog,GunCon,neGcon,JogCon,Wheel,Mouse,SNAC Port 2,Off;",
 	// Light-gun page (Point Blank 2 / Gunbarl, KEYCUS C443). Sensitivity is exposed rather than
 	// guessed: the gun counters span only 688 x 239 units, so a high-DPI mouse saturates them at
 	// 1:1. Crosshair defaults OFF — the real cabinet draws none (you aim a physical gun), and
 	// keycus 0x09 is shared with My Angel 3, which is not a gun game.
 	"P4,Light Gun;",
 	"P4O[100],Crosshair,Off,On;",
-	"P4O[101],Gun Input,Mouse,SNAC GunCon (Port 1);",
 	"P4O[99:98],Gun Sensitivity,1/4,1/8,1/2,1/1;",
 	"P3,Debug;",
 	"P3O[28],FPS Counter,Off,On;",
@@ -432,6 +434,7 @@ reg         ioctl_wait = 0;
 wire [19:0] joy;
 wire [19:0] joy_unmod;
 wire [19:0] joy2;
+wire [19:0] joy2_unmod;
 wire [19:0] joy3;
 wire [19:0] joy4;
 
@@ -450,6 +453,9 @@ wire [15:0] joystick_analog_l3;
 wire [15:0] joystick_analog_r3;
 
 wire [7:0] paddle_0;
+wire [7:0] paddle_1;
+wire [8:0] spinner_0;
+wire [8:0] spinner_1;
 
 wire [24:0] mouse;
 
@@ -479,7 +485,7 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(4), .BLKSZ(3)) hps_io
 	.forced_scandoubler(forced_scandoubler),
 
 	.joystick_0(joy_unmod),
-	.joystick_1(joy2),
+	.joystick_1(joy2_unmod),
 	.joystick_2(joy3),
 	.joystick_3(joy4),
 	.ps2_key(ps2_key),
@@ -536,11 +542,12 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(4), .BLKSZ(3)) hps_io
    .joystick_1_rumble(paused ? 16'h0000 : joystick2_rumble),
 
    .paddle_0(paddle_0),
+   .paddle_1(paddle_1),
+   .spinner_0(spinner_0),
+   .spinner_1(spinner_1),
 
    .direct_video(DIRECT_VIDEO)
 );
-
-assign joy = joy_unmod[16] ? 20'b0 : joy_unmod;
 
 assign sd_rd[0] = 0;
 assign sd_wr[0] = 0;
@@ -856,63 +863,176 @@ defparam savestate_ui.INFO_TIMEOUT_BITS = 25;
 
 ////////////////////////////  PAD  ///////////////////////////////////
 
-// 0000 -> DualShock
-// 0001 -> off
-// 0010 -> digital
-// 0011 -> analog
-// 0100 -> Namco GunCon lightgun
-// 0101 -> Namco NeGcon
-// 0110 -> Wheel Negcon
-// 0111 -> Wheel Analog
-// 1000 -> mouse
-// 1001 -> Konami Justifier lightgun
-// 1010 -> SNAC
-// 1011 -> Analog Joystick
-// 1100..1111 -> reserved
+// Only controller modes with distinct System 11 routing are exposed:
+// 0000 digital, 0001 analog, 0010 USB GunCon, 0011 USB neGcon,
+// 0100 USB JogCon/paddle, 0101 USB wheel, 0110 mouse,
+// 0111 physical SNAC (device auto-detected), 1000 off.
+wire PadPortEnable1  = (status[48:45] != 4'b1000);
+wire PadPortDigital1 = (status[48:45] == 4'b0000);
+wire PadPortAnalog1  = (status[48:45] == 4'b0001);
+wire PadPortGunCon1  = (status[48:45] == 4'b0010);
+wire PadPortNeGcon1  = (status[48:45] == 4'b0011) || (status[48:45] == 4'b0101);
+wire PadPortJogCon1  = (status[48:45] == 4'b0100);
+wire PadPortWheel1   = (status[48:45] == 4'b0101);
+wire PadPortMouse1   = (status[48:45] == 4'b0110);
+wire snacPort1       = (status[48:45] == 4'b0111) && ~multitap;
 
-wire PadPortDS1      = (status[48:45] == 4'b0000);
-wire PadPortEnable1  = (status[48:45] != 4'b0001);
-wire PadPortDigital1 = (status[48:45] == 4'b0010) || (status[52:49] == 4'b1100);
-wire PadPortAnalog1  = (status[48:45] == 4'b0011) || (status[48:45] == 4'b0111);
-wire PadPortGunCon1  = (status[48:45] == 4'b0100);
-wire PadPortNeGcon1  = (status[48:45] == 4'b0101) || (status[48:45] == 4'b0110);
-wire PadPortWheel1   = (status[48:45] == 4'b0110) || (status[48:45] == 4'b0111);
-wire PadPortMouse1   = (status[48:45] == 4'b1000);
-wire PadPortJustif1  = (status[48:45] == 4'b1001);
-wire snacPort1       = (status[48:45] == 4'b1010) && ~multitap;
-wire PadPortStick1   = (status[48:45] == 4'b1011);
-wire PadPortPopn1    = (status[48:45] == 4'b1100);
+wire PadPortEnable2  = (status[52:49] != 4'b1000) && ~multitap;
+wire PadPortDigital2 = (status[52:49] == 4'b0000);
+wire PadPortAnalog2  = (status[52:49] == 4'b0001);
+wire PadPortGunCon2  = (status[52:49] == 4'b0010);
+wire PadPortNeGcon2  = (status[52:49] == 4'b0011) || (status[52:49] == 4'b0101);
+wire PadPortJogCon2  = (status[52:49] == 4'b0100);
+wire PadPortWheel2   = (status[52:49] == 4'b0101);
+wire PadPortMouse2   = (status[52:49] == 4'b0110);
+wire snacPort2       = (status[52:49] == 4'b0111) && ~multitap;
 
-wire PadPortDS2      = (status[52:49] == 4'b0000);
-wire PadPortEnable2  = (status[52:49] != 4'b0001) && ~multitap;
-wire PadPortDigital2 = (status[52:49] == 4'b0010) || (status[52:49] == 4'b1100);
-wire PadPortAnalog2  = (status[52:49] == 4'b0011) || (status[52:49] == 4'b0111);
-wire PadPortGunCon2  = (status[52:49] == 4'b0100);
-wire PadPortNeGcon2  = (status[52:49] == 4'b0101) || (status[52:49] == 4'b0110);
-wire PadPortWheel2   = (status[52:49] == 4'b0110) || (status[52:49] == 4'b0111);
-wire PadPortMouse2   = (status[52:49] == 4'b1000);
-wire PadPortJustif2  = (status[52:49] == 4'b1001);
-wire snacPort2       = (status[52:49] == 4'b1010) && ~multitap;
-wire PadPortStick2   = (status[52:49] == 4'b1011);
-wire PadPortPopn2    = (status[52:49] == 4'b1100);
+// The embedded PSX pad block keeps these compatibility inputs, but System 11
+// has no distinct behavior for the corresponding console-only device types.
+wire PadPortDS1      = 1'b0;
+wire PadPortJustif1  = 1'b0;
+wire PadPortStick1   = 1'b0;
+wire PadPortPopn1    = 1'b0;
+wire PadPortDS2      = 1'b0;
+wire PadPortJustif2  = 1'b0;
+wire PadPortStick2   = 1'b0;
+wire PadPortPopn2    = 1'b0;
 
-reg paddleMode = 0;
-reg paddleMin = 0;
-reg paddleMax = 0;
-wire [7:0] joy0_xmuxed = (paddleMode) ? (paddle_0 - 8'd128) : joystick_analog_l0[7:0];
+// USB specialty controllers may arrive either as an absolute paddle or a
+// relative spinner. A centred paddle report arms the absolute path; otherwise
+// JogCon mode integrates spinner deltas and holds the resulting wheel position.
+reg paddle_seen1 = 1'b0;
+reg paddle_seen2 = 1'b0;
+reg spinner_prev1 = 1'b0;
+reg spinner_prev2 = 1'b0;
+reg spinner_seen1 = 1'b0;
+reg spinner_seen2 = 1'b0;
+reg signed [7:0] jog_spinner_pos1 = 8'sd0;
+reg signed [7:0] jog_spinner_pos2 = 8'sd0;
+wire signed [8:0] jog_spinner_sum1 =
+   $signed({jog_spinner_pos1[7], jog_spinner_pos1})
+ + $signed({spinner_0[7], spinner_0[7:0]});
+wire signed [8:0] jog_spinner_sum2 =
+   $signed({jog_spinner_pos2[7], jog_spinner_pos2})
+ + $signed({spinner_1[7], spinner_1[7:0]});
 
-// to activate paddleMode negcon mode must be active and paddle must best moved
 always @(posedge clk_1x) begin
-   if (PadPortNeGcon1) begin
-      if (paddle_0 < 112) paddleMin <= 1'b1;
-      if (paddle_0 > 144) paddleMax <= 1'b1;
-      if (paddleMin && paddleMax) paddleMode <= 1'b1;
+   spinner_prev1 <= spinner_0[8];
+   spinner_prev2 <= spinner_1[8];
+
+   if (!(PadPortNeGcon1 || PadPortWheel1 || PadPortJogCon1)) begin
+      paddle_seen1 <= 1'b0;
+      spinner_seen1 <= 1'b0;
+      jog_spinner_pos1 <= 8'sd0;
    end else begin
-      paddleMode <= 0;
-      paddleMin <= 0;
-      paddleMax <= 0;
+      if ((paddle_0 > 8'd8) && (paddle_0 < 8'd248)) paddle_seen1 <= 1'b1;
+      if (!PadPortJogCon1) begin
+         spinner_seen1 <= 1'b0;
+         jog_spinner_pos1 <= 8'sd0;
+      end
+      else if (!paddle_seen1 && (spinner_prev1 != spinner_0[8])) begin
+         spinner_seen1 <= 1'b1;
+         if (jog_spinner_sum1 > 9'sd127) jog_spinner_pos1 <= 8'sd127;
+         else if (jog_spinner_sum1 < -9'sd127) jog_spinner_pos1 <= -8'sd127;
+         else jog_spinner_pos1 <= jog_spinner_sum1[7:0];
+      end
+   end
+
+   if (!(PadPortNeGcon2 || PadPortWheel2 || PadPortJogCon2)) begin
+      paddle_seen2 <= 1'b0;
+      spinner_seen2 <= 1'b0;
+      jog_spinner_pos2 <= 8'sd0;
+   end else begin
+      if ((paddle_1 > 8'd8) && (paddle_1 < 8'd248)) paddle_seen2 <= 1'b1;
+      if (!PadPortJogCon2) begin
+         spinner_seen2 <= 1'b0;
+         jog_spinner_pos2 <= 8'sd0;
+      end
+      else if (!paddle_seen2 && (spinner_prev2 != spinner_1[8])) begin
+         spinner_seen2 <= 1'b1;
+         if (jog_spinner_sum2 > 9'sd127) jog_spinner_pos2 <= 8'sd127;
+         else if (jog_spinner_sum2 < -9'sd127) jog_spinner_pos2 <= -8'sd127;
+         else jog_spinner_pos2 <= jog_spinner_sum2[7:0];
+      end
    end
 end
+
+wire signed [7:0] usb_axis1_x =
+   PadPortJogCon1 ? (paddle_seen1 ? $signed(paddle_0 - 8'd128)
+                                  : spinner_seen1 ? jog_spinner_pos1
+                                                  : $signed(joystick_analog_l0[7:0])) :
+   ((PadPortNeGcon1 || PadPortWheel1) && paddle_seen1)
+      ? $signed(paddle_0 - 8'd128) : $signed(joystick_analog_l0[7:0]);
+wire signed [7:0] usb_axis2_x =
+   PadPortJogCon2 ? (paddle_seen2 ? $signed(paddle_1 - 8'd128)
+                                  : spinner_seen2 ? jog_spinner_pos2
+                                                  : $signed(joystick_analog_l1[7:0])) :
+   ((PadPortNeGcon2 || PadPortWheel2) && paddle_seen2)
+      ? $signed(paddle_1 - 8'd128) : $signed(joystick_analog_l1[7:0]);
+
+wire snac_p1_connected;
+wire snac_p1_sample_valid;
+wire [7:0] snac_p1_device_id;
+wire [15:0] snac_p1_buttons;
+wire signed [7:0] snac_p1_left_x;
+wire signed [7:0] snac_p1_left_y;
+wire snac_p1_drive_valid;
+wire signed [7:0] snac_p1_drive_steer;
+wire [7:0] snac_p1_drive_throttle;
+wire snac_p1_gun_aim_valid;
+wire [8:0] snac_p1_gun_raw_x;
+wire [8:0] snac_p1_gun_raw_y;
+wire [9:0] snac_p1_gun_x;
+wire [7:0] snac_p1_gun_y;
+
+wire snac_p2_connected;
+wire snac_p2_sample_valid;
+wire [7:0] snac_p2_device_id;
+wire [15:0] snac_p2_buttons;
+wire signed [7:0] snac_p2_left_x;
+wire signed [7:0] snac_p2_left_y;
+wire snac_p2_drive_valid;
+wire signed [7:0] snac_p2_drive_steer;
+wire [7:0] snac_p2_drive_throttle;
+wire snac_p2_gun_aim_valid;
+wire [8:0] snac_p2_gun_raw_x;
+wire [8:0] snac_p2_gun_raw_y;
+wire [9:0] snac_p2_gun_x;
+wire [7:0] snac_p2_gun_y;
+
+wire [19:0] snac_joy1 =
+   {4'b0000, snac_p1_buttons[2], snac_p1_buttons[1],
+    snac_p1_buttons[9], snac_p1_buttons[8], snac_p1_buttons[0],
+    snac_p1_buttons[3], snac_p1_buttons[11], snac_p1_buttons[10],
+    snac_p1_buttons[12], snac_p1_buttons[15], snac_p1_buttons[13],
+    snac_p1_buttons[14], snac_p1_buttons[4], snac_p1_buttons[6],
+    snac_p1_buttons[7], snac_p1_buttons[5]};
+wire [19:0] snac_joy2 =
+   {4'b0000, snac_p2_buttons[2], snac_p2_buttons[1],
+    snac_p2_buttons[9], snac_p2_buttons[8], snac_p2_buttons[0],
+    snac_p2_buttons[3], snac_p2_buttons[11], snac_p2_buttons[10],
+    snac_p2_buttons[12], snac_p2_buttons[15], snac_p2_buttons[13],
+    snac_p2_buttons[14], snac_p2_buttons[4], snac_p2_buttons[6],
+    snac_p2_buttons[7], snac_p2_buttons[5]};
+
+wire [19:0] usb_joy1 = joy_unmod[16] ? 20'b0 : joy_unmod;
+assign joy  = snacPort1 ? snac_joy1 : (PadPortEnable1 ? usb_joy1   : 20'b0);
+assign joy2 = snacPort2 ? snac_joy2 : (PadPortEnable2 ? joy2_unmod : 20'b0);
+
+wire usb_axis1_valid = PadPortAnalog1 | PadPortNeGcon1
+                     | PadPortWheel1 | PadPortJogCon1;
+wire usb_axis2_valid = PadPortAnalog2 | PadPortNeGcon2
+                     | PadPortWheel2 | PadPortJogCon2;
+wire signed [7:0] controller_axis1_x =
+   snacPort1 ? snac_p1_left_x : usb_axis1_valid ? usb_axis1_x : 8'sd0;
+wire signed [7:0] controller_axis1_y =
+   snacPort1 ? snac_p1_left_y
+             : usb_axis1_valid ? $signed(joystick_analog_l0[15:8]) : 8'sd0;
+wire signed [7:0] controller_axis2_x =
+   snacPort2 ? snac_p2_left_x : usb_axis2_valid ? usb_axis2_x : 8'sd0;
+wire signed [7:0] controller_axis2_y =
+   snacPort2 ? snac_p2_left_y
+             : usb_axis2_valid ? $signed(joystick_analog_l1[15:8]) : 8'sd0;
 
 // 00 -> multitap off
 // 01 -> port1, 4 x digital
@@ -1148,19 +1268,40 @@ always @(posedge clk_1x) begin
 end
 wire  [9:0] mouse_gun_px = px_f[13:4];             // 0..1023 virtual
 wire  [7:0] mouse_gun_py = py_f[11:4];             // 0..255  virtual
-wire        guncon_snac_enable = status[101];
-wire  [9:0] gun_px = guncon_snac_enable ? guncon_aim_x : mouse_gun_px;
-wire  [7:0] gun_py = guncon_snac_enable ? guncon_aim_y : mouse_gun_py;
+wire [7:0] usb_gun1_x = joystick_analog_l0[7:0] ^ 8'h80;
+wire [7:0] usb_gun1_y = joystick_analog_l0[15:8] ^ 8'h80;
+wire [7:0] usb_gun2_x = joystick_analog_l1[7:0] ^ 8'h80;
+wire [7:0] usb_gun2_y = joystick_analog_l1[15:8] ^ 8'h80;
+wire usb_gun1_mode = PadPortGunCon1;
+wire usb_gun2_mode = PadPortGunCon2;
+wire usb_gun1_aim_valid = (usb_gun1_x != 8'h00) && (usb_gun1_x != 8'hFF)
+                       && (usb_gun1_y != 8'h00) && (usb_gun1_y != 8'hFF);
+wire usb_gun2_aim_valid = (usb_gun2_x != 8'h00) && (usb_gun2_x != 8'hFF)
+                       && (usb_gun2_y != 8'h00) && (usb_gun2_y != 8'hFF);
+wire snac_gun1 = snacPort1 && snac_p1_connected && (snac_p1_device_id == 8'h63);
+wire snac_gun2 = snacPort2 && snac_p2_connected && (snac_p2_device_id == 8'h63);
+wire p1_gun_mode = PadPortMouse1 | usb_gun1_mode | snacPort1;
+wire p1_gun_input_valid = snacPort1 ? (snac_gun1 && snac_p1_gun_aim_valid)
+                        : usb_gun1_mode ? usb_gun1_aim_valid
+                        : PadPortMouse1;
+wire [9:0] gun_px = snacPort1 ? snac_p1_gun_x
+                    : usb_gun1_mode ? {usb_gun1_x, 2'b00}
+                    : PadPortMouse1 ? mouse_gun_px : 10'd512;
+wire [7:0] gun_py = snacPort1 ? snac_p1_gun_y
+                    : usb_gun1_mode ? usb_gun1_y
+                    : PadPortMouse1 ? mouse_gun_py : 8'd128;
 wire [19:0] gx_mul = gun_px * 10'd687;
 wire [15:0] gy_mul = gun_py * 8'd239;
 wire signed [15:0] gun_x_mapped = 16'sd216 + $signed({6'b0, gx_mul[19:10]}); // 216..903
 wire signed [15:0] gun_y_mapped = 16'sd44  + $signed({8'b0, gy_mul[15:8]});  // 44..283
-// A GunCon offscreen report is deliberately outside the legal cabinet counter range. This
-// preserves offscreen shots/reloads instead of turning them into a hit at the screen corner.
-wire signed [15:0] gun_x = (guncon_snac_enable && !guncon_aim_valid) ? 16'sd0 : gun_x_mapped;
-wire signed [15:0] gun_y = (guncon_snac_enable && !guncon_aim_valid) ? 16'sd0 : gun_y_mapped;
-// Trigger: mouse LEFT in mouse mode, or the physical GunCon trigger in SNAC mode.
-wire gun_trigger = guncon_snac_enable ? (guncon_connected & guncon_trigger) : mouse[0];
+// An offscreen light-gun report is deliberately outside the legal cabinet
+// counter range. This preserves offscreen shots instead of pinning them to a
+// visible corner.
+wire signed [15:0] gun_x = (p1_gun_mode && !p1_gun_input_valid) ? 16'sd0 : gun_x_mapped;
+wire signed [15:0] gun_y = (p1_gun_mode && !p1_gun_input_valid) ? 16'sd0 : gun_y_mapped;
+wire gun_trigger = snacPort1 ? (snac_gun1 && snac_p1_buttons[13])
+                 : usb_gun1_mode ? joy[4]
+                 : PadPortMouse1 ? mouse[0] : 1'b0;
 
 // ===== P2 light gun pointer (2026-07-26) =====
 // Point Blank 2 / Gunbarl are 2-PLAYER games: MAME defines GUN2X/GUN2Y with exactly the same
@@ -1178,8 +1319,8 @@ wire gun_trigger = guncon_snac_enable ? (guncon_connected & guncon_trigger) : mo
 // Y also grows downward, so P2 needs NO Y inversion (unlike the PS/2 mouse above, whose +Y is up).
 // Pointer lives in the SAME virtual 1024x256 space as P1, so it inherits the resolution-
 // independent crosshair mapping for free.
-wire signed [7:0] p2_sx_raw = joystick_analog_l1[7:0];
-wire signed [7:0] p2_sy_raw = joystick_analog_l1[15:8];
+wire signed [7:0] p2_sx_raw = controller_axis2_x;
+wire signed [7:0] p2_sy_raw = controller_axis2_y;
 // Deadzone: sticks rest a few counts off centre, and without this the crosshair would creep
 // across the screen forever while untouched.
 wire signed [7:0] p2_ax = (p2_sx_raw > 8'sd12 || p2_sx_raw < -8'sd12) ? p2_sx_raw : 8'sd0;
@@ -1214,7 +1355,10 @@ always @(posedge clk_1x) begin
    end
    // Latch "a second player is here" on first stick deflection or trigger pull, so a solo player
    // never sees a stray second crosshair parked in the middle of the screen.
-   if ((p2_sx != 8'sd0) || (p2_sy != 8'sd0) || joy2[4]) p2_gun_active <= 1'b1;
+   if ((p2_sx != 8'sd0) || (p2_sy != 8'sd0) || joy2[4]
+       || (snac_gun2 && snac_p2_gun_aim_valid)
+       || (usb_gun2_mode && usb_gun2_aim_valid)
+       || (PadPortMouse2 && mouse[0])) p2_gun_active <= 1'b1;
 end
 // Titles that use MAME's BASE namcos11 port set, where ADC0/1/2 belong to PLAYER 3 (see the
 // in_adc1/in_adc2 comment at the c76_sound instance). Everything else PORT_MODIFYs those channels.
@@ -1223,20 +1367,36 @@ wire zn_generic_adc = (zn_keycus_id == 8'h03)    // Dunk Mania
                     | (zn_keycus_id == 8'h06)    // Dancing Eyes
                     | (zn_keycus_id == 8'h08);   // Star Sweep
 
-wire  [9:0] gun2_px = p2x_f[13:4];                  // 0..1023 virtual
-wire  [7:0] gun2_py = p2y_f[11:4];                  // 0..255  virtual
+wire p2_absolute_gun_mode = snacPort2 | usb_gun2_mode | PadPortMouse2;
+wire p2_gun_input_valid = snacPort2 ? (snac_gun2 && snac_p2_gun_aim_valid)
+                        : usb_gun2_mode ? usb_gun2_aim_valid
+                        : PadPortMouse2;
+wire [9:0] gun2_px = snacPort2 ? snac_p2_gun_x
+                     : usb_gun2_mode ? {usb_gun2_x, 2'b00}
+                     : PadPortMouse2 ? mouse_gun_px : p2x_f[13:4];
+wire [7:0] gun2_py = snacPort2 ? snac_p2_gun_y
+                     : usb_gun2_mode ? usb_gun2_y
+                     : PadPortMouse2 ? mouse_gun_py : p2y_f[11:4];
 wire [19:0] g2x_mul = gun2_px * 10'd687;
 wire [15:0] g2y_mul = gun2_py * 8'd239;
-wire signed [15:0] gun2_x = 16'sd216 + $signed({6'b0, g2x_mul[19:10]});   // 216..903
-wire signed [15:0] gun2_y = 16'sd44  + $signed({8'b0, g2y_mul[15:8]});    // 44..283
+wire signed [15:0] gun2_x_mapped =
+   16'sd216 + $signed({6'b0, g2x_mul[19:10]});   // 216..903
+wire signed [15:0] gun2_y_mapped =
+   16'sd44  + $signed({8'b0, g2y_mul[15:8]});    // 44..283
+wire signed [15:0] gun2_x =
+   (p2_absolute_gun_mode && !p2_gun_input_valid) ? 16'sd0 : gun2_x_mapped;
+wire signed [15:0] gun2_y =
+   (p2_absolute_gun_mode && !p2_gun_input_valid) ? 16'sd0 : gun2_y_mapped;
+wire p2_gun_trigger = snacPort2 ? (snac_gun2 && snac_p2_buttons[13])
+                    : PadPortMouse2 ? mouse[0] : joy2[4];
 
-// Pocket Racer steering source: left-stick X, or the paddle when paddleMode is on
-// (joy0_xmuxed already handles that mux). Signed -128..127; half-scaled and reversed
-// into the wheel's 0x41-0xC0 span (inside MAME's legal 0x38-0xC8).
+// Pocket Racer steering source: the selected USB axis/paddle/spinner or a
+// physical SNAC controller. Signed -128..127; half-scaled and reversed into
+// the wheel's 0x41-0xC0 span (inside MAME's legal 0x38-0xC8).
 //
-// DIGITAL STEERING FALLBACK (2026-07-26): joy0_xmuxed carries ONLY the left analog stick
-// (or an armed NeGcon paddle), so on a d-pad or keyboard it stayed 0 and in_adc0 sat
-// permanently at 0x80 = centred — the car could not be steered at all. Ramp a virtual
+// DIGITAL STEERING FALLBACK (2026-07-26): without an analog source, a d-pad or
+// keyboard otherwise leaves in_adc0 permanently at 0x80 = centred — the car
+// could not be steered at all. Ramp a virtual
 // wheel while Left/Right are held and spring it back to centre on release. The analog
 // stick still wins whenever it is deflected past a small deadzone, so wheel/stick users
 // are unaffected. ~258 Hz tick at clk_1x ~33.87 MHz => ~0.5 s from centre to full lock.
@@ -1244,21 +1404,52 @@ wire signed [15:0] gun2_y = 16'sd44  + $signed({8'b0, g2y_mul[15:8]});    // 44.
 reg [16:0]       prc_steer_cnt = 17'd0;
 reg signed [7:0] prc_dig       = 8'sd0;
 always @(posedge clk_1x) begin
-   prc_steer_cnt <= prc_steer_cnt + 17'd1;
-   if (prc_steer_cnt == 17'd0) begin
-      if (joy[1] & ~joy[0]) begin                          // Left
-         if (prc_dig > -8'sd127) prc_dig <= prc_dig - 8'sd1;
-      end else if (joy[0] & ~joy[1]) begin                 // Right
-         if (prc_dig <  8'sd127) prc_dig <= prc_dig + 8'sd1;
-      end else begin                                       // auto-centre on release
-         if      (prc_dig > 8'sd0) prc_dig <= prc_dig - 8'sd1;
-         else if (prc_dig < 8'sd0) prc_dig <= prc_dig + 8'sd1;
+   if (!PadPortEnable1) begin
+      prc_steer_cnt <= 17'd0;
+      prc_dig <= 8'sd0;
+   end else begin
+      prc_steer_cnt <= prc_steer_cnt + 17'd1;
+      if (prc_steer_cnt == 17'd0) begin
+         if (joy[1] & ~joy[0]) begin                       // Left
+            if (prc_dig > -8'sd127) prc_dig <= prc_dig - 8'sd1;
+         end else if (joy[0] & ~joy[1]) begin              // Right
+            if (prc_dig <  8'sd127) prc_dig <= prc_dig + 8'sd1;
+         end else begin                                    // auto-centre on release
+            if      (prc_dig > 8'sd0) prc_dig <= prc_dig - 8'sd1;
+            else if (prc_dig < 8'sd0) prc_dig <= prc_dig + 8'sd1;
+         end
       end
    end
 end
-wire signed [7:0] prc_analog     = joy0_xmuxed;
-wire              prc_analog_live = (prc_analog > 8'sd16) || (prc_analog < -8'sd16);
-wire signed [7:0] prc_stick      = prc_analog_live ? prc_analog : prc_dig;
+wire snac_p1_analog_valid = snac_p1_drive_valid
+                         || (snac_p1_device_id == 8'h53)
+                         || (snac_p1_device_id[7:4] == 4'h7);
+wire signed [7:0] prc_analog = snacPort1
+                             ? (snac_p1_drive_valid ? snac_p1_drive_steer
+                                                    : snac_p1_left_x)
+                             : usb_axis1_x;
+wire prc_analog_source_valid = snacPort1 ? snac_p1_analog_valid
+                                                    : usb_axis1_valid;
+wire prc_analog_live = prc_analog_source_valid
+                    && ((prc_analog > 8'sd16) || (prc_analog < -8'sd16));
+wire signed [7:0] prc_stick = !PadPortEnable1 ? 8'sd0
+                            : prc_analog_live ? prc_analog : prc_dig;
+
+function automatic [7:0] pedal_from_negative_axis(input signed [7:0] axis);
+begin
+   // MiSTer wheel pedals use negative Y: -128 is full and 0 is released.
+   pedal_from_negative_axis = axis[7] ? {~axis[6:0], 1'b1} : 8'h00;
+end
+endfunction
+
+wire usb_pedal_mode = PadPortNeGcon1 | PadPortWheel1 | PadPortJogCon1;
+wire [7:0] usb_pedal = usb_pedal_mode
+                     ? pedal_from_negative_axis($signed(joystick_analog_l0[15:8]))
+                     : 8'h00;
+wire [7:0] prc_throttle = joy[4] ? 8'hFF
+                               : (snacPort1 && snac_p1_drive_valid)
+                                 ? snac_p1_drive_throttle
+                                 : snacPort1 ? 8'h00 : usb_pedal;
 
 c76_sound c76snd
 (
@@ -1284,12 +1475,16 @@ c76_sound c76snd
    // games MAME's PORT_MODIFY leaves only 0x10 (BUTTON1 = TRIGGER) and 0x80 (START1) live, so the
    // low-nibble remap below is a My Angel 3 mapping that is harmless on the gun games. Bit 4 is
    // the trigger: OR in the mouse left button so a mouse can fire as well as a pad Button1.
-   // GunCon A is the cabinet Start button; the trigger continues to feed BUTTON1.
-   .in_player1(~{(joy[10] | (guncon_snac_enable & guncon_button_a)),
-                 joy[6],  joy[5],  (joy[4] | ((zn_keycus_id == 8'h09) & gun_trigger)),
+   // GunCon A maps to Start through snac_joy1; the trigger remains BUTTON1.
+   .in_player1(~{joy[10],
+                 joy[6], joy[5],
+                 ((snac_gun1 ? 1'b0 : joy[4])
+                    | ((zn_keycus_id == 8'h09) & gun_trigger)),
                  (zn_keycus_id == 8'h09) ? {joy[4],  joy[5],  joy[6],  joy[7]}  : {joy[3],  joy[2],  joy[1],  joy[0]}}),
-   .in_player2(~{joy2[10], joy2[6], joy2[5], joy2[4],
-                 (zn_keycus_id == 8'h09) ? {joy2[4], joy2[5], joy2[6], joy2[7]} : {joy2[3], joy2[2], joy2[1], joy2[0]}}),
+   .in_player2(~{joy2[10], joy2[6], joy2[5],
+                  ((snac_gun2 ? 1'b0 : joy2[4])
+                    | ((zn_keycus_id == 8'h09) & p2_gun_trigger)),
+                  (zn_keycus_id == 8'h09) ? {joy2[4], joy2[5], joy2[6], joy2[7]} : {joy2[3], joy2[2], joy2[1], joy2[0]}}),
    // PLAYER4: bit4 (0x10) = Tekken P2 kick (joy2[6]) / Soul Edge P2 Guard (C409 0x02 -> joy2[7]);
    //          bit3 (0x08) = Pocket Racer (C432 0x07) BUTTON2 = view toggle (joy[5]) per MAME
    //          PORT_MODIFY("PLAYER4") 0x08; else unused.
@@ -1304,10 +1499,12 @@ c76_sound c76snd
    // COIN3/COIN4 were hardcoded unpressed, so players 3 and 4 could not credit up even once their
    // controls existed -- on a 4-player cabinet like Dunk Mania that alone makes them unusable.
    // Driven only on the base layout: the tekken/myangel3 port sets mark these bits IPT_UNUSED.
-   // GunCon B is the P1 cabinet Coin input.
-   .in_switch (~{status[95], status[94], (joy[11] | (guncon_snac_enable & guncon_button_b)), joy2[11],
-                 zn_generic_adc ? joy3[11] : 1'b0, zn_generic_adc ? joy4[11] : 1'b0,
-                 status[96], status[97]}),
+   // A physical GunCon's B button is Cross, which becomes cabinet Coin here.
+   .in_switch (~{status[95], status[94],
+                  (joy[11] | (snac_gun1 && snac_p1_buttons[14])),
+                  (joy2[11] | (snac_gun2 && snac_p2_buttons[14])),
+                  zn_generic_adc ? joy3[11] : 1'b0, zn_generic_adc ? joy4[11] : 1'b0,
+                  status[96], status[97]}),
    // Pocket Racer (KEYCUS C432): AN0 = steering (PADDLE centre 0x80, legal 0x38-0xC8,
    // reversed per MAME) from the left analog stick X, AN1 = throttle pedal (0x00
    // released, BTN1 = full). AN0 left at the 0xFF idle value reads as a wheel pegged
@@ -1340,9 +1537,11 @@ c76_sound c76snd
    // Pocket Racer AN1 = throttle PEDAL. MAME's ADC1 is IPT_PEDAL + PORT_REVERSE (MINMAX 0x00-0x7F),
    // so a RELEASED pedal reads 0x7F, full = 0x00. We had it inverted (released=0x00) -> the C76 saw
    // the pedal pinned "fully pressed" at boot (stuck-pedal) and never published the input-ready bit
-   // at shram 0xBD32 -> MIPS hung at 0x80018C9C. Released = 0x7F, Button1 (accel) = 0x00.
-   .in_adc1   ((zn_keycus_id == 8'h07) ? (joy[4] ? 8'h00 : 8'h7F)
-               : zn_generic_adc ? (joy3[5] ? 8'h00 : 8'hFF)           // P3 BUTTON2 (never P1)
+   // at shram 0xBD32 -> MIPS hung at 0x80018C9C. The normalized throttle below
+   // preserves that range while accepting USB/SNAC neGcon and wheel pedals.
+   .in_adc1   ((zn_keycus_id == 8'h07)
+                ? (8'h7F - {1'b0, prc_throttle[7:1]})
+                : zn_generic_adc ? (joy3[5] ? 8'h00 : 8'hFF)           // P3 BUTTON2 (never P1)
                : (zn_keycus_id == 8'h02) ? 8'hFF                      // Soul Edge: MAME UNUSED
                                        : (joy[7] ? 8'h00 : 8'hFF)),   // else: Tekken P1 BTN4 (right kick)
    // ADC2: Tekken = P1 BTN3 left kick (joy[6]); Soul Edge (C409, id 0x02) maps P1 BUTTON4
@@ -1725,12 +1924,12 @@ psx
    .KeyL2      ({joy4[12],joy3[12],joy2[12],joy[12]}),
    .KeyL3      ({joy4[14],joy3[14],joy2[14],joy[14]}),
    .ToggleDS   (ToggleDS),
-   .Analog1XP1(joy0_xmuxed),
-   .Analog1YP1(joystick_analog_l0[15:8]),
+   .Analog1XP1(controller_axis1_x),
+   .Analog1YP1(controller_axis1_y),
    .Analog2XP1(joystick_analog_r0[7:0]),
    .Analog2YP1(joystick_analog_r0[15:8]),
-   .Analog1XP2(joystick_analog_l1[7:0]),
-   .Analog1YP2(joystick_analog_l1[15:8]),
+   .Analog1XP2(controller_axis2_x),
+   .Analog1YP2(controller_axis2_y),
    .Analog2XP2(joystick_analog_r1[7:0]),
    .Analog2YP2(joystick_analog_r1[15:8]),
    .Analog1XP3(joystick_analog_l2[7:0]),
@@ -2409,7 +2608,7 @@ end
 wire [11:0] xh_dx = (xh_hcnt >= xh_cx) ? (xh_hcnt - xh_cx) : (xh_cx - xh_hcnt);
 wire [11:0] xh_dy = (xh_vcnt >= xh_cy) ? (xh_vcnt - xh_cy) : (xh_cy - xh_vcnt);
 wire        xhair = status[100] & (zn_keycus_id == 8'h09)
-                    & (!guncon_snac_enable | guncon_aim_valid)
+                    & p1_gun_mode & p1_gun_input_valid
                     & ~video_gamma.hb & ~video_gamma.vb
                     & (((xh_dy == 12'd0) & (xh_dx <= 12'd6))     // horizontal arm
                      | ((xh_dx == 12'd0) & (xh_dy <= 12'd6)));   // vertical arm
@@ -2418,6 +2617,7 @@ wire        xhair = status[100] & (zn_keycus_id == 8'h09)
 wire [11:0] xh2_dx = (xh_hcnt >= xh2_cx) ? (xh_hcnt - xh2_cx) : (xh2_cx - xh_hcnt);
 wire [11:0] xh2_dy = (xh_vcnt >= xh2_cy) ? (xh_vcnt - xh2_cy) : (xh2_cy - xh_vcnt);
 wire        xhair2 = status[100] & (zn_keycus_id == 8'h09) & p2_gun_active
+                    & (!p2_absolute_gun_mode | p2_gun_input_valid)
                     & ~video_gamma.hb & ~video_gamma.vb
                     & (((xh2_dy == 12'd0) & (xh2_dx <= 12'd6))
                      | ((xh2_dx == 12'd0) & (xh2_dy <= 12'd6)));
@@ -2727,49 +2927,61 @@ wire actionNextSnac = 1'b0;
 wire irq10Snac = 1'b0;
 wire ack = 1'b1;
 
-wire guncon_select_n;
-wire guncon_command;
-wire guncon_serial_clk;
-wire guncon_connected;
-wire guncon_sample_valid;
-wire guncon_aim_valid;
-wire [8:0] guncon_raw_x;
-wire [8:0] guncon_raw_y;
-wire [9:0] guncon_aim_x;
-wire [7:0] guncon_aim_y;
-wire guncon_trigger;
-wire guncon_button_a;
-wire guncon_button_b;
+wire snac_select1_n;
+wire snac_select2_n;
+wire snac_command;
+wire snac_serial_clk;
 
-guncon_snac guncon_snac
+psx_snac_input psx_snac_input
 (
-	.clk          (clk_1x),
-	.reset        (reset_or),
-	.enable       (guncon_snac_enable),
-	.frame_sync   (VGA_VS),
-	.data_in      (USER_IN[4]),
-	.ack_in       (USER_IN[3]),
-	.select_n     (guncon_select_n),
-	.command      (guncon_command),
-	.serial_clk   (guncon_serial_clk),
-	.connected    (guncon_connected),
-	.sample_valid (guncon_sample_valid),
-	.aim_valid    (guncon_aim_valid),
-	.raw_x        (guncon_raw_x),
-	.raw_y        (guncon_raw_y),
-	.aim_x        (guncon_aim_x),
-	.aim_y        (guncon_aim_y),
-	.trigger      (guncon_trigger),
-	.button_a     (guncon_button_a),
-	.button_b     (guncon_button_b)
+	.clk                  (clk_1x),
+	.reset                (reset_or),
+	.enable_p1            (snacPort1),
+	.enable_p2            (snacPort2),
+	.frame_sync           (VGA_VS),
+	.data_in              (USER_IN[4]),
+	.ack_in               (USER_IN[3]),
+	.select1_n            (snac_select1_n),
+	.select2_n            (snac_select2_n),
+	.command              (snac_command),
+	.serial_clk           (snac_serial_clk),
+	.p1_connected         (snac_p1_connected),
+	.p1_sample_valid      (snac_p1_sample_valid),
+	.p1_device_id         (snac_p1_device_id),
+	.p1_buttons           (snac_p1_buttons),
+	.p1_left_x            (snac_p1_left_x),
+	.p1_left_y            (snac_p1_left_y),
+	.p1_drive_valid       (snac_p1_drive_valid),
+	.p1_drive_steer       (snac_p1_drive_steer),
+	.p1_drive_throttle    (snac_p1_drive_throttle),
+	.p1_gun_aim_valid     (snac_p1_gun_aim_valid),
+	.p1_gun_raw_x         (snac_p1_gun_raw_x),
+	.p1_gun_raw_y         (snac_p1_gun_raw_y),
+	.p1_gun_x             (snac_p1_gun_x),
+	.p1_gun_y             (snac_p1_gun_y),
+	.p2_connected         (snac_p2_connected),
+	.p2_sample_valid      (snac_p2_sample_valid),
+	.p2_device_id         (snac_p2_device_id),
+	.p2_buttons           (snac_p2_buttons),
+	.p2_left_x            (snac_p2_left_x),
+	.p2_left_y            (snac_p2_left_y),
+	.p2_drive_valid       (snac_p2_drive_valid),
+	.p2_drive_steer       (snac_p2_drive_steer),
+	.p2_drive_throttle    (snac_p2_drive_throttle),
+	.p2_gun_aim_valid     (snac_p2_gun_aim_valid),
+	.p2_gun_raw_x         (snac_p2_gun_raw_x),
+	.p2_gun_raw_y         (snac_p2_gun_raw_y),
+	.p2_gun_x             (snac_p2_gun_x),
+	.p2_gun_y             (snac_p2_gun_y)
 );
 
 // PSX SNAC pinout from MiSTer-devel/PSX_MiSTer:
 //   OUT0=P2 select, OUT1=P1 select, OUT2=CMD, OUT5=CLK, OUT6=GunCon CSYNC.
 // High releases the open-drain USER_IO line. GunCon DAT and ACK return on IN4/IN3.
-assign USER_OUT = guncon_snac_enable
-                ? {~(VGA_HS ^ VGA_VS), guncon_serial_clk, 2'b11,
-                   guncon_command, guncon_select_n, 1'b1}
+assign USER_OUT = (snacPort1 || snacPort2)
+                ? {(snac_gun1 || snac_gun2) ? ~(VGA_HS ^ VGA_VS) : 1'b1,
+                   snac_serial_clk, 2'b11, snac_command,
+                   snac_select1_n, snac_select2_n}
                 : 7'h7F;
 
 endmodule

@@ -9,8 +9,16 @@ Namco System 11 (1994) is an arcade board built around Sony PlayStation technolo
 
 The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-devel/PSX_MiSTer) core by **Robert Peip (FPGAzumSpass)**, which provides the CPU, GPU, GTE, DMA, and memory subsystem foundation.
 
-## Changes in this release (2026-07-27)
+## Changes in this release (2026-07-28)
 
+- **PSX-style P1/P2 controller selectors restored.** Each port can independently
+  select Digital, Analog, GunCon, neGcon, JogCon, Wheel, Mouse, explicit
+  `SNAC Port 1/2`, or Off. Console-only duplicate modes are omitted. SNAC
+  auto-detects native digital/analog pads, GunCon (`0x63`), neGcon (`0x23`),
+  and JogCon (`0xE3`) on a shared two-port poller.
+- **Pocket Racer specialty controls.** USB and SNAC neGcon/JogCon steering now
+  reaches the cabinet wheel ADC, USB wheel pedals and native neGcon analog I
+  reach the throttle ADC, and the MRA labels Accelerate/View.
 - **C76 mailbox write-lane bug fixed — this is the important one.** The shared-RAM
   mailbox between the MIPS and the C76 sound MCU selected its 16-bit halfword from
   address bit 1 alone, but the CPU issues *word-aligned* addresses with byte
@@ -23,8 +31,8 @@ The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-de
     and other one-shots that travelled over the same mailbox — now play.
   - C76 command delivery is measurably more reliable across all titles.
 - **Light-gun support added (Point Blank 2, Gunbarl).** The System 11 GUN I/F
-  register block is implemented for a USB mouse or a real GunCon 1 through the
-  PSX SNAC adapter. A new **Light Gun** OSD page selects the input and adds an
+  register block is implemented for USB mouse/light-gun axes or real GunCon 1
+  controllers through either PSX SNAC port. The **Light Gun** OSD page adds an
   optional on-screen crosshair and mouse sensitivity setting.
 - **Second light gun (2-player Point Blank 2 / Gunbarl).** Both guns previously
   shared one pointer, so co-op was impossible. Player 2 now aims with its own pad —
@@ -76,7 +84,7 @@ The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-de
 ## Contents
 
 ```
-SYSTEM11-RELEASE-20260727/
+SYSTEM11-RELEASE-20260728/
 ├── release/                       ← copy onto your MiSTer SD card
 │   └── _Arcade/
 │       ├── <one primary .mra per game (11 games)>
@@ -91,7 +99,7 @@ SYSTEM11-RELEASE-20260727/
 │       │   ├── _Dunk Mania/       ← Japan DM1-VER.C                                         (1)
 │       │   └── _Star Sweep/       ← Japan STP1-VER.A                                        (1)
 │       └── cores/
-│           └── XNSYSTEM11_20260727.rbf   ← the FPGA core bitstream
+│           └── XNSYSTEM11_20260728.rbf   ← the FPGA core bitstream
 └── source/                        ← full corresponding FPGA source (build it yourself)
 ```
 
@@ -155,20 +163,17 @@ The cabinet TEST and SERVICE switches are available as OSD toggles (see below), 
 to four pads and each player coins up and joins at their own station. The other
 titles are one- or two-player and simply ignore the extra pads.
 
-**Light-gun titles (Point Blank 2, Gunbarl).** Player 1 uses a USB mouse by
-default: move to aim and **left-click to shoot**. Button 1 on a pad also acts as
-the trigger. For a real GunCon 1, connect a PlayStation SNAC adapter and select
-**OSD → Light Gun → Gun Input → SNAC GunCon (Port 1)**. The GunCon trigger fires,
-its A button is Start, and its B button inserts Coin. GunCon aiming requires a
-compatible 15 kHz CRT/direct-video path because the gun senses the displayed
-raster; HDMI/LCD output alone cannot provide optical aiming. SNAC GunCon support
-is currently player 1 only.
+**Light-gun titles (Point Blank 2, Gunbarl).** Select the source under
+**OSD → Controllers → P1/P2 Input**. Choose `Mouse` for the merged USB mouse
+stream, `GunCon` for a USB light gun exposing absolute axes, or `SNAC Port 1/2`
+for a native GunCon. A physical GunCon's trigger fires, A is
+Start, and B inserts Coin. Native GunCon aiming requires a compatible 15 kHz
+CRT/direct-video path; HDMI/LCD output alone cannot provide optical aiming.
+Both SNAC ports are supported.
 
-*Two-player light gun:* player 2 aims with its **pad** — left analog stick, or the
-D-pad if you have no analog. Deflection steers the pointer like a trackball (hold
-to glide, release to hold position) rather than snapping back to the screen centre
-the way a self-centring stick otherwise would. MiSTer merges every physical mouse
-into one stream, so a second mouse cannot be assigned to player 2.
+For a normal P2 pad, the left stick or D-pad still moves the green pointer like
+a trackball. MiSTer exposes one merged PS/2 mouse stream, so selecting `Mouse`
+for both players shares that pointer.
 
 The real cabinet draws no crosshair — you point a physical gun at the screen — so
 the core's crosshair is an optional aid, off by default (OSD → Light Gun). Player
@@ -176,23 +181,30 @@ the core's crosshair is an optional aid, off by default (OSD → Light Gun). Pla
 or fires. Adjust *Gun Sensitivity* to suit your mouse's DPI (it also scales the
 pad pointer's speed); that setting does not affect SNAC.
 
-**Pocket Racer.** Steer with the left analog stick or the D-pad (which ramps
-toward full lock and springs back to centre); Button 1 accelerates; Button 2
-changes the camera view. The game has no Start button — insert a coin and it
-begins.
+**Pocket Racer.** Digital mode uses the auto-centring D-pad; Analog mode uses
+the left stick. USB `neGcon` and `Wheel` use left-X steering and
+negative left-Y as the accelerator; `JogCon` accepts an absolute paddle or
+relative spinner. Button 1 always forces full acceleration and Button 2 changes
+the camera view. `SNAC Port 1` auto-detects native neGcon and JogCon packets,
+including neGcon analog I throttle. JogCon force feedback is not implemented.
+The game has no Start button — insert a coin and it begins.
 
 ## OSD Options
 
 - **DIP Switches**
   - `DIP1 Test` — board test DIP
   - `DIP2 Freeze` — board freeze DIP
+- **Controllers**
+  - `P1 Input` / `P2 Input` — Digital, Analog, GunCon, neGcon, JogCon,
+    Wheel, Mouse, SNAC Port 1/2, or Off
+  - Explicit controller names select USB mappings; `SNAC Port 1/2` polls and
+    auto-detects the physical PlayStation controller on that port
 - **Debug**
   - `FPS Counter` — on-screen frame rate display
   - `Boot Debug Overlay` — diagnostic overlay during boot (off by default)
   - `Test Mode` — asserts the cabinet TEST switch (enters the operator test menu)
   - `Service Mode` — asserts the cabinet SERVICE switch (service credit)
 - **Light Gun** (Point Blank 2 / Gunbarl)
-  - `Gun Input` — USB mouse (default) or a GunCon 1 on PlayStation SNAC port 1
   - `Crosshair` — draw an on-screen crosshair (default **Off**; the real cabinet
     draws none, and it is unwanted if you use a real light gun)
   - `Gun Sensitivity` — mouse-to-wheel divisor: 1/4 (default), 1/8, 1/2, 1/1
@@ -214,6 +226,8 @@ Opening the OSD pauses the core. Video scaling/aspect options are currently hand
   (negative setup slack on the HDMI PLL clock and, marginally, on one core clock
   output). No functional failure has been traced to it, and it is not the cause of
   the blank above, but it is a real defect and is being worked on.
+- **JogCon motor feedback is not implemented.** Native and USB JogCon steering
+  and buttons are accepted, but System 11 wheel-force output is not yet emulated.
 - All nine System 11 KEYCUS chips (C406, C409, C410, C411, C430, C431, C432, C442,
   C443) are implemented and hardware-verified. GPU type is selected per game
   (Tekken 1 = CXD8538Q/coh100; every other title = CXD8561Q/coh110, per MAME).
@@ -222,8 +236,8 @@ Opening the OSD pauses the core. Video scaling/aspect options are currently hand
   CD-ROM drive — are removed or stubbed to reclaim FPGA logic. The PSX controller port
   (SIO0) is a minimal register stub: several titles run stock PSX pad init at boot and
   need the port's registers to answer (as they do inside the CXD8530 on real boards),
-  but no PlayStation controller protocol is implemented — arcade inputs are read by the
-  C76 MCU.
+  but no in-game PlayStation controller protocol is implemented. The separate SNAC
+  poller translates physical controllers directly into the C76 cabinet inputs.
 
 ## Hardware Requirements
 
