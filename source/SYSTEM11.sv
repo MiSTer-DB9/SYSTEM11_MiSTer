@@ -381,6 +381,7 @@ parameter CONF_STR = {
 	// keycus 0x09 is shared with My Angel 3, which is not a gun game.
 	"P4,Light Gun;",
 	"P4O[100],Crosshair,Off,On;",
+	"P4O[101],Gun Input,Mouse,SNAC GunCon (Port 1);",
 	"P4O[99:98],Gun Sensitivity,1/4,1/8,1/2,1/1;",
 	"P3,Debug;",
 	"P3O[28],FPS Counter,Off,On;",
@@ -1145,15 +1146,21 @@ always @(posedge clk_1x) begin
       py_f <= (ny_f < 0) ? 12'd0 : (ny_f > $signed({5'b0, PYMAX_F})) ? PYMAX_F : ny_f[11:0];
    end
 end
-wire  [9:0] gun_px = px_f[13:4];                   // 0..1023 virtual
-wire  [7:0] gun_py = py_f[11:4];                   // 0..255  virtual
+wire  [9:0] mouse_gun_px = px_f[13:4];             // 0..1023 virtual
+wire  [7:0] mouse_gun_py = py_f[11:4];             // 0..255  virtual
+wire        guncon_snac_enable = status[101];
+wire  [9:0] gun_px = guncon_snac_enable ? guncon_aim_x : mouse_gun_px;
+wire  [7:0] gun_py = guncon_snac_enable ? guncon_aim_y : mouse_gun_py;
 wire [19:0] gx_mul = gun_px * 10'd687;
 wire [15:0] gy_mul = gun_py * 8'd239;
-wire signed [15:0] gun_x = 16'sd216 + $signed({6'b0, gx_mul[19:10]});   // 216..903
-wire signed [15:0] gun_y = 16'sd44  + $signed({8'b0, gy_mul[15:8]});    // 44..283
-// Trigger: mouse LEFT acts as BUTTON1, which is exactly what MAME's ptblank2 PORT_MODIFY leaves
-// live on PLAYER1 (0x10). Button1 on a pad already works, so this only adds the mouse.
-wire gun_trigger = mouse[0];
+wire signed [15:0] gun_x_mapped = 16'sd216 + $signed({6'b0, gx_mul[19:10]}); // 216..903
+wire signed [15:0] gun_y_mapped = 16'sd44  + $signed({8'b0, gy_mul[15:8]});  // 44..283
+// A GunCon offscreen report is deliberately outside the legal cabinet counter range. This
+// preserves offscreen shots/reloads instead of turning them into a hit at the screen corner.
+wire signed [15:0] gun_x = (guncon_snac_enable && !guncon_aim_valid) ? 16'sd0 : gun_x_mapped;
+wire signed [15:0] gun_y = (guncon_snac_enable && !guncon_aim_valid) ? 16'sd0 : gun_y_mapped;
+// Trigger: mouse LEFT in mouse mode, or the physical GunCon trigger in SNAC mode.
+wire gun_trigger = guncon_snac_enable ? (guncon_connected & guncon_trigger) : mouse[0];
 
 // ===== P2 light gun pointer (2026-07-26) =====
 // Point Blank 2 / Gunbarl are 2-PLAYER games: MAME defines GUN2X/GUN2Y with exactly the same
@@ -1277,7 +1284,9 @@ c76_sound c76snd
    // games MAME's PORT_MODIFY leaves only 0x10 (BUTTON1 = TRIGGER) and 0x80 (START1) live, so the
    // low-nibble remap below is a My Angel 3 mapping that is harmless on the gun games. Bit 4 is
    // the trigger: OR in the mouse left button so a mouse can fire as well as a pad Button1.
-   .in_player1(~{joy[10],  joy[6],  joy[5],  (joy[4] | ((zn_keycus_id == 8'h09) & gun_trigger)),
+   // GunCon A is the cabinet Start button; the trigger continues to feed BUTTON1.
+   .in_player1(~{(joy[10] | (guncon_snac_enable & guncon_button_a)),
+                 joy[6],  joy[5],  (joy[4] | ((zn_keycus_id == 8'h09) & gun_trigger)),
                  (zn_keycus_id == 8'h09) ? {joy[4],  joy[5],  joy[6],  joy[7]}  : {joy[3],  joy[2],  joy[1],  joy[0]}}),
    .in_player2(~{joy2[10], joy2[6], joy2[5], joy2[4],
                  (zn_keycus_id == 8'h09) ? {joy2[4], joy2[5], joy2[6], joy2[7]} : {joy2[3], joy2[2], joy2[1], joy2[0]}}),
@@ -1295,7 +1304,8 @@ c76_sound c76snd
    // COIN3/COIN4 were hardcoded unpressed, so players 3 and 4 could not credit up even once their
    // controls existed -- on a 4-player cabinet like Dunk Mania that alone makes them unusable.
    // Driven only on the base layout: the tekken/myangel3 port sets mark these bits IPT_UNUSED.
-   .in_switch (~{status[95], status[94], joy[11], joy2[11],
+   // GunCon B is the P1 cabinet Coin input.
+   .in_switch (~{status[95], status[94], (joy[11] | (guncon_snac_enable & guncon_button_b)), joy2[11],
                  zn_generic_adc ? joy3[11] : 1'b0, zn_generic_adc ? joy4[11] : 1'b0,
                  status[96], status[97]}),
    // Pocket Racer (KEYCUS C432): AN0 = steering (PADDLE centre 0x80, legal 0x38-0xC8,
@@ -2399,6 +2409,7 @@ end
 wire [11:0] xh_dx = (xh_hcnt >= xh_cx) ? (xh_hcnt - xh_cx) : (xh_cx - xh_hcnt);
 wire [11:0] xh_dy = (xh_vcnt >= xh_cy) ? (xh_vcnt - xh_cy) : (xh_cy - xh_vcnt);
 wire        xhair = status[100] & (zn_keycus_id == 8'h09)
+                    & (!guncon_snac_enable | guncon_aim_valid)
                     & ~video_gamma.hb & ~video_gamma.vb
                     & (((xh_dy == 12'd0) & (xh_dx <= 12'd6))     // horizontal arm
                      | ((xh_dx == 12'd0) & (xh_dy <= 12'd6)));   // vertical arm
@@ -2703,246 +2714,62 @@ always_ff @(posedge clk_1x) begin
 	end
 end
 
-wire clk8Snac;
 wire clk9Snac;
-wire oldClk8;
-wire oldClk9;
 wire selectedPort1Snac;
 wire selectedPort2Snac;
-wire oldselectedPort1;
-wire oldselectedPort2;
 wire [7:0]transmitValueSnac;
-wire [7:0]receiveBufferSnac;
-wire receiveValidSnac;
 wire beginTransferSnac;
-wire actionNextSnac;
-wire actionNextPadSnac;
-reg [7:0]Send;
-reg [7:0]Receive;
-wire Cmd;
-wire Dat;
-wire ack;
-wire oldAck;
-//wire ackSnac;
-wire [15:0]ackTimer;
-wire ackNone;
-wire oneTime;
-wire [3:0]bitCnt;
-wire [8:0]byteCnt;
-wire [8:0]bytesLeft;
-wire [7:0]pad1ID;
-wire [7:0]pad2ID;
-wire [7:0]targetID;
-wire irq10Snac;
-wire csync;
-wire MCtransfer;
-wire PStransfer;
-wire [7:0]PSdatalength;
+// The console joypad/SIO0 engine is intentionally absent in the System 11 build. Keep its
+// compatibility ports inert; the dedicated poller below owns the physical SNAC pins.
+wire [7:0] receiveBufferSnac = 8'h00;
+wire receiveValidSnac = 1'b0;
+wire actionNextSnac = 1'b0;
+wire irq10Snac = 1'b0;
+wire ack = 1'b1;
 
-reg USER_IN3_1;
-reg USER_IN4_1;
-reg USER_IN6_1;
+wire guncon_select_n;
+wire guncon_command;
+wire guncon_serial_clk;
+wire guncon_connected;
+wire guncon_sample_valid;
+wire guncon_aim_valid;
+wire [8:0] guncon_raw_x;
+wire [8:0] guncon_raw_y;
+wire [9:0] guncon_aim_x;
+wire [7:0] guncon_aim_y;
+wire guncon_trigger;
+wire guncon_button_a;
+wire guncon_button_b;
 
-reg USER_IN3_2;
-reg USER_IN4_2;
-reg USER_IN6_2;
+guncon_snac guncon_snac
+(
+	.clk          (clk_1x),
+	.reset        (reset_or),
+	.enable       (guncon_snac_enable),
+	.frame_sync   (VGA_VS),
+	.data_in      (USER_IN[4]),
+	.ack_in       (USER_IN[3]),
+	.select_n     (guncon_select_n),
+	.command      (guncon_command),
+	.serial_clk   (guncon_serial_clk),
+	.connected    (guncon_connected),
+	.sample_valid (guncon_sample_valid),
+	.aim_valid    (guncon_aim_valid),
+	.raw_x        (guncon_raw_x),
+	.raw_y        (guncon_raw_y),
+	.aim_x        (guncon_aim_x),
+	.aim_y        (guncon_aim_y),
+	.trigger      (guncon_trigger),
+	.button_a     (guncon_button_a),
+	.button_b     (guncon_button_b)
+);
 
-reg USER_IN3_3;
-reg USER_IN3_4;
-reg ackglitch;
-
-assign clk8Snac = bitCnt < 8 ? clk9Snac : 1'b1;
-
-always @(posedge clk_1x)
-begin
-
-   USER_IN3_1 <= USER_IN[3];
-   USER_IN4_1 <= USER_IN[4];
-   USER_IN6_1 <= USER_IN[6];
-
-   USER_IN3_2 <= USER_IN3_1;
-   USER_IN4_2 <= USER_IN4_1;
-   USER_IN6_2 <= USER_IN6_1;
-
-   USER_IN3_3 <= USER_IN3_2;//glitch filter for ack
-   USER_IN3_4 <= USER_IN3_3;
-   ackglitch  <= ~USER_IN3_1 && ~USER_IN3_2 && ~USER_IN3_3 && ~USER_IN3_4 ? 1'b0 : 1'b1;
-
-	if (snacPort1 || snacPort2) begin
-		USER_OUT[0] <= ~selectedPort2Snac;
-		USER_OUT[1] <= ~selectedPort1Snac;
-		USER_OUT[2] <= Cmd;
-		USER_OUT[3] <= 1'b1; //ACK
-		USER_OUT[4] <= 1'b1; //DAT
-		USER_OUT[5] <= oldClk8;
-		ack         <= ~ackglitch ? USER_IN3_2 : 1'b1;
-		Dat         <= USER_IN4_2;
-
-		if ((pad1ID == 8'h63 || pad2ID == 8'h63) && (pad1ID != 8'h31 || pad2ID != 8'h31)) begin //quirk for guncon, irq is N/C in guncon. so using irq line and outputting csync on snac for g-con. only if justifier isn't connected
-			USER_OUT[6] <= ~csync;
-			irq10Snac   <= 1'b0;
-			csync       <= VGA_HS ^ VGA_VS;//real csync shifts HSync during VSync, should be close enough to work	with guncon
-		end
-		else begin
-			USER_OUT[6] <= 1'b1;
-			irq10Snac   <= ~USER_IN6_2;
-		end
-	end
-	else begin
-		USER_OUT  <= '1;
-		irq10Snac <= 1'b0;
-		ack       <= 1'b1;
-		Dat       <= 1'b1;
-	end
-
-	oldselectedPort1 <= selectedPort1Snac;
-	oldselectedPort2 <= selectedPort2Snac;
-
-	if ((~oldselectedPort1 && selectedPort1Snac) || (~oldselectedPort2 && selectedPort2Snac)) begin
-		byteCnt   <= 9'd0;
-		bytesLeft <= 9'd0;
-	end
-
-	if (beginTransferSnac) begin
-		bitCnt  <= 4'd0;
-		byteCnt <= byteCnt + 9'd1 ;
-	end
-
-	oldClk8 <= clk8Snac;
-	oldClk9 <= clk9Snac;
-
-	if (oldClk9 && ~clk9Snac) begin	//send on falling edge
-		if (bitCnt < 8) begin
-			if (bitCnt==0) begin
-				Cmd  <= transmitValueSnac[0];
-				Send <= {1'b1, transmitValueSnac[7:1]};
-			end
-			else begin
-				Cmd  <= Send[0];
-				Send <= {1'b1, Send[7:1]};
-			end
-		end
-		else begin
-			Cmd  <= 1'b1;
-			Send <= Send;
-		end
-	end
-
-	if(~oldClk8 && clk8Snac) begin //receive on rising edge
-		Receive <= { Dat, Receive[7:1]};
-		bitCnt <= bitCnt + 1'b1;
-		if(bitCnt == 4'd7) begin//check for ack
-			oneTime <= 1'b1;
-			if (MCtransfer) ackTimer <= 16'd60000;//very late ack after 7th byte. around 56000 cycles (1.7ms) with a sony MC. 3rd party MCs don't seem to do this
-			else begin
-				if (byteCnt == bytesLeft + 3) ackTimer <= 16'd400;//only wait around 150 on last byte
-				else ackTimer <= 16'd1800;//1st byte of multitap(1375) cycles to ack,digital(460),analog(350-400),ds2(250-400),mouse(120),guncon(270)
-			end
-		end
-	end
-
-	if (ackTimer > 0) begin
-		ackTimer <= ackTimer - 16'd1;
-	end
-
-	oldAck <= ack;
-	if(oldAck && ~ack) begin //ack received
-		actionNextPadSnac <= 1'b1;
-		ackTimer <= 16'd173;//16'd255;//a delay between ack and next action. too small might cause a hang. was using acktimer 1-255
-	end
-	else if(ackTimer == 1) begin //wait over
-		actionNextPadSnac <= 1'b1;
-		oneTime <= 1'b0;
-	end
-	else if (ackTimer == 16'd258) begin //no ack
-		ackNone <= 1'b1;
-		actionNextPadSnac <= 1'b1;
-	end
-	else if (ackTimer == 16'd256) begin //reset if no ack
-		oneTime <= 1'b0;
-		ackTimer <= 16'd0;
-	end
-	else begin
-		actionNextPadSnac <= 1'b0;
-		ackNone <= 1'b0;
-	end
-
-	if (actionNextPadSnac && ((snacPort1 && selectedPort1Snac) || (snacPort2 && selectedPort2Snac))) begin //logic for joypad.vhd
-		if (oneTime) begin
-			if (ackNone) begin
-				if (byteCnt < (bytesLeft + 4)) begin // no ack on last byte of transfer
-					receiveBufferSnac <= Receive;
-					receiveValidSnac <= 1'b1;
-					actionNextSnac <= 1'b1;
-				end
-				else
-					actionNextSnac <= 1'b1;
-				end
-			else begin
-				if (byteCnt < (bytesLeft + 4)) begin
-					receiveBufferSnac <= Receive;
-					receiveValidSnac <= 1'b1;
-					//ackSnac <= 1'b1;
-				end
-				actionNextSnac <= 1'b1;
-			end
-		end
-		else begin
-			actionNextSnac <= 1'b1;
-		end
-	end
-	else begin
-		receiveBufferSnac <= 8'd0;
-		receiveValidSnac <= 1'b0;
-		actionNextSnac <= 1'b0;
-		//ackSnac <= 1'b0;
-	end
-
-	if (receiveValidSnac) begin
-		if (byteCnt == 1) begin
-			targetID <= transmitValueSnac;
-		end
-		if (byteCnt == 2) begin
-			if (targetID == 8'h81 || targetID == 8'h82 || targetID == 8'h83 || targetID == 8'h84) begin 	//memcard quirks
-				MCtransfer <= 1'b1;
-				if (transmitValueSnac == 8'h52) bytesLeft <= 9'd137;//read
-				if (transmitValueSnac == 8'h57) bytesLeft <= 9'd135;//write
-				if (transmitValueSnac == 8'h53) bytesLeft <= 9'd7;//ID Cmd
-				//pocketstation
-				if (transmitValueSnac == 8'h50) bytesLeft <= 9'd0;//Change a FUNC 03h related value
-				if (transmitValueSnac == 8'h58) bytesLeft <= 9'd2;//Get an ID or Version value
-				if (transmitValueSnac == 8'h59) bytesLeft <= 9'd6;//Prepare File Execution with Dir_index, and Parameter
-				if (transmitValueSnac == 8'h5A) bytesLeft <= 9'd18;//Get Dir_index, ComFlags, F_SN, Date, and Time
-				if (transmitValueSnac == 8'h5D) bytesLeft <= 9'd3;//Execute Custom Download Notification
-				if (transmitValueSnac == 8'h5E) bytesLeft <= 9'd3;//Get-and-Send ComFlags.bit1,3,2
-				if (transmitValueSnac == 8'h5F) bytesLeft <= 9'd1;//Get-and-Send ComFlags.bit0
-				if (transmitValueSnac == 8'h5B) begin//Execute Function and transfer data from Pocketstation to PSX--variable length
-					bytesLeft <= 9'd3;
-					PStransfer <= 1'b1;
-				end
-				if (transmitValueSnac == 8'h5C) begin//Execute Function and transfer data from PSX to Pocketstation--variable length
-					bytesLeft <= 9'd3;
-					PStransfer <= 1'b1;
-				end
-			end
-			else begin //joypad quirks
-				MCtransfer <= 1'b0;
-				if (selectedPort1Snac) pad1ID <= Receive;
-				if (selectedPort2Snac) pad2ID <= Receive;
-
-				if (Receive == 8'h80) bytesLeft <= 9'd32; //for multitap
-				else bytesLeft <= {5'd0, (Receive[3:0] + Receive[3:0])};
-			end
-		end
-		if (byteCnt == 4 && PStransfer == 1) begin //for pocketstation
-			bytesLeft <= bytesLeft + Receive;
-			PSdatalength <=  Receive;
-		end
-		if ((byteCnt == PSdatalength + 5) && PStransfer == 1) begin
-			bytesLeft <= bytesLeft + Receive;
-			PStransfer <= 1'b0;
-		end
-	end
-end
+// PSX SNAC pinout from MiSTer-devel/PSX_MiSTer:
+//   OUT0=P2 select, OUT1=P1 select, OUT2=CMD, OUT5=CLK, OUT6=GunCon CSYNC.
+// High releases the open-drain USER_IO line. GunCon DAT and ACK return on IN4/IN3.
+assign USER_OUT = guncon_snac_enable
+                ? {~(VGA_HS ^ VGA_VS), guncon_serial_clk, 2'b11,
+                   guncon_command, guncon_select_n, 1'b1}
+                : 7'h7F;
 
 endmodule

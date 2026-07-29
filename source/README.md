@@ -20,9 +20,9 @@ The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-de
     and other one-shots that travelled over the same mailbox — now play.
   - C76 command delivery is measurably more reliable across all titles.
 - **Light-gun support added (Point Blank 2, Gunbarl).** The System 11 GUN I/F
-  register block is implemented, aimed with a USB mouse, with left-click as the
-  trigger. A new **Light Gun** OSD page adds an optional on-screen crosshair and a
-  sensitivity setting.
+  register block is implemented for a USB mouse or a real GunCon 1 through the
+  PSX SNAC adapter. A new **Light Gun** OSD page selects the input and adds an
+  optional on-screen crosshair and mouse sensitivity setting.
 - **Three more titles now ship:** Pocket Racer, Point Blank 2 and Gunbarl —
   eleven playable titles in total, up from nine.
 - **Soul Edge Kick and Guard confirmed working** in play (both inputs are gated on
@@ -37,7 +37,7 @@ The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-de
 | Tekken (World, TE2/VER.C) | **Playable** | Gameplay, sound effects, music, FMV intros and attract mode all work. Three regional alternates provided. |
 | Tekken 2 Ver.B (World, TES2/VER.B) | **Playable** | Boots, renders, music and inputs all work. All eight revisions ship (seven as alternates), each boot-tested. |
 | Pocket Racer (Japan, PKR1/VER.B) | **Playable** | KEYCUS C432. New this release — plays with music and sound effects. Steering on the analog stick or D-pad, accelerate on Button 1. |
-| Point Blank 2 (World, GNB2/VER.A) | **Playable (light gun)** | KEYCUS C443. New this release — aim with a USB mouse, left-click to shoot. Three alternates plus Gunbarl. |
+| Point Blank 2 (World, GNB2/VER.A) | **Playable (light gun)** | KEYCUS C443. Aim with a USB mouse or a GunCon 1 through PSX SNAC. Three alternates plus Gunbarl. |
 | Gunbarl (Japan, GNB1/VER.A) | **Playable (light gun)** | The Japanese release of Point Blank 2; ships as a Point Blank 2 alternate. |
 | Soul Edge Ver. II (SO4/VER.C) | Boots + attract | KEYCUS C409. Kick and Guard confirmed working. |
 | Dunk Mania (DM2/VER.C) | Boots + attract | KEYCUS C410; slow first boot (~2 min) |
@@ -128,11 +128,17 @@ Tekken uses an 8-way joystick and four buttons per player, plus Start and Coin:
 
 Two players are supported. The cabinet TEST and SERVICE switches are available as OSD toggles (see below), so the operator test menu can be reached without dedicated buttons.
 
-**Light-gun titles (Point Blank 2, Gunbarl).** Plug in a USB mouse: move to aim,
-**left-click to shoot**. Button 1 on a pad also acts as the trigger. The real
-cabinet draws no crosshair — you point a physical gun at the screen — so the
-core's crosshair is an optional aid, off by default (OSD → Light Gun). Adjust
-*Gun Sensitivity* to suit your mouse's DPI.
+**Light-gun titles (Point Blank 2, Gunbarl).** The default input is a USB mouse:
+move to aim and **left-click to shoot**. Button 1 on a pad also acts as the
+trigger. For a real GunCon 1, connect a PlayStation SNAC adapter and select
+**OSD → Light Gun → Gun Input → SNAC GunCon (Port 1)**. The GunCon trigger fires,
+its A button is Start, and its B button inserts Coin. GunCon aiming requires a
+compatible 15 kHz CRT/direct-video path; HDMI/LCD output alone cannot provide
+optical aiming. SNAC GunCon support is currently player 1 only.
+
+The real cabinet draws no crosshair, so the core's crosshair is an optional aid,
+off by default. Adjust *Gun Sensitivity* to suit your mouse's DPI; that setting
+does not affect SNAC.
 
 **Pocket Racer.** Steer with the left analog stick or the D-pad (which ramps
 toward full lock and springs back to centre); Button 1 accelerates; Button 2
@@ -150,6 +156,7 @@ begins.
   - `Test Mode` — asserts the cabinet TEST switch (enters the operator test menu)
   - `Service Mode` — asserts the cabinet SERVICE switch (service credit)
 - **Light Gun** (Point Blank 2 / Gunbarl)
+  - `Gun Input` — USB mouse (default) or a GunCon 1 on PlayStation SNAC port 1
   - `Crosshair` — draw an on-screen crosshair (default **Off**; the real cabinet
     draws none, and it is unwanted if you use a real light gun)
   - `Gun Sensitivity` — mouse-to-wheel divisor: 1/4 (default), 1/8, 1/2, 1/1

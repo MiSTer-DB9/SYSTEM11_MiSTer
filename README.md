@@ -23,9 +23,9 @@ The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-de
     and other one-shots that travelled over the same mailbox — now play.
   - C76 command delivery is measurably more reliable across all titles.
 - **Light-gun support added (Point Blank 2, Gunbarl).** The System 11 GUN I/F
-  register block is implemented, aimed with a USB mouse, with left-click as the
-  trigger. A new **Light Gun** OSD page adds an optional on-screen crosshair and a
-  sensitivity setting.
+  register block is implemented for a USB mouse or a real GunCon 1 through the
+  PSX SNAC adapter. A new **Light Gun** OSD page selects the input and adds an
+  optional on-screen crosshair and mouse sensitivity setting.
 - **Second light gun (2-player Point Blank 2 / Gunbarl).** Both guns previously
   shared one pointer, so co-op was impossible. Player 2 now aims with its own pad —
   left analog stick or D-pad — and gets its own green crosshair. MiSTer exposes a
@@ -61,7 +61,7 @@ The core is derived from the excellent [PSX_MiSTer](https://github.com/MiSTer-de
 | Tekken (World, TE2/VER.C) | **Playable** | Gameplay, sound effects, music, FMV intros and attract mode all work. Three regional alternates provided. |
 | Tekken 2 Ver.B (World, TES2/VER.D) | **Playable** | Boots, renders, music and inputs all work. This is MAME's `tekken2` parent set and the gameplay-verified revision. All eight revisions ship (seven as alternates), each boot-tested. |
 | Pocket Racer (Japan, PKR1/VER.B) | **Playable** | KEYCUS C432. New this release — plays with music and sound effects. Steering on the analog stick or D-pad, accelerate on Button 1. |
-| Point Blank 2 (World, GNB2/VER.A) | **Playable (light gun)** | KEYCUS C443. New this release — aim with a USB mouse, left-click to shoot. Three alternates plus Gunbarl. |
+| Point Blank 2 (World, GNB2/VER.A) | **Playable (light gun)** | KEYCUS C443. Aim with a USB mouse or a GunCon 1 through PSX SNAC. Three alternates plus Gunbarl. |
 | Gunbarl (Japan, GNB1/VER.A) | **Playable (light gun)** | The Japanese release of Point Blank 2; ships as a Point Blank 2 alternate. |
 | Soul Edge Ver. II (SO4/VER.C) | **Playable** | KEYCUS C409. Kick and Guard confirmed working. |
 | Dunk Mania (DM2/VER.C) | **Playable** | KEYCUS C410; slow first boot (~2 min) |
@@ -155,8 +155,14 @@ The cabinet TEST and SERVICE switches are available as OSD toggles (see below), 
 to four pads and each player coins up and joins at their own station. The other
 titles are one- or two-player and simply ignore the extra pads.
 
-**Light-gun titles (Point Blank 2, Gunbarl).** Player 1 plugs in a USB mouse: move
-to aim, **left-click to shoot**. Button 1 on a pad also acts as the trigger.
+**Light-gun titles (Point Blank 2, Gunbarl).** Player 1 uses a USB mouse by
+default: move to aim and **left-click to shoot**. Button 1 on a pad also acts as
+the trigger. For a real GunCon 1, connect a PlayStation SNAC adapter and select
+**OSD → Light Gun → Gun Input → SNAC GunCon (Port 1)**. The GunCon trigger fires,
+its A button is Start, and its B button inserts Coin. GunCon aiming requires a
+compatible 15 kHz CRT/direct-video path because the gun senses the displayed
+raster; HDMI/LCD output alone cannot provide optical aiming. SNAC GunCon support
+is currently player 1 only.
 
 *Two-player light gun:* player 2 aims with its **pad** — left analog stick, or the
 D-pad if you have no analog. Deflection steers the pointer like a trackball (hold
@@ -165,10 +171,10 @@ the way a self-centring stick otherwise would. MiSTer merges every physical mous
 into one stream, so a second mouse cannot be assigned to player 2.
 
 The real cabinet draws no crosshair — you point a physical gun at the screen — so
-the core's crosshair is an optional aid, off by default (OSD → Light Gun). Player 1's
-is white and player 2's is green; player 2's only appears once player 2 moves or
-fires. Adjust *Gun Sensitivity* to suit your mouse's DPI (it also scales the pad
-pointer's speed).
+the core's crosshair is an optional aid, off by default (OSD → Light Gun). Player
+1's is white and player 2's is green; player 2's only appears once player 2 moves
+or fires. Adjust *Gun Sensitivity* to suit your mouse's DPI (it also scales the
+pad pointer's speed); that setting does not affect SNAC.
 
 **Pocket Racer.** Steer with the left analog stick or the D-pad (which ramps
 toward full lock and springs back to centre); Button 1 accelerates; Button 2
@@ -186,6 +192,7 @@ begins.
   - `Test Mode` — asserts the cabinet TEST switch (enters the operator test menu)
   - `Service Mode` — asserts the cabinet SERVICE switch (service credit)
 - **Light Gun** (Point Blank 2 / Gunbarl)
+  - `Gun Input` — USB mouse (default) or a GunCon 1 on PlayStation SNAC port 1
   - `Crosshair` — draw an on-screen crosshair (default **Off**; the real cabinet
     draws none, and it is unwanted if you use a real light gun)
   - `Gun Sensitivity` — mouse-to-wheel divisor: 1/4 (default), 1/8, 1/2, 1/1
