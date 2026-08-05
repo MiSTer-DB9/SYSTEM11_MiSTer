@@ -171,16 +171,92 @@ module emu
 	// 1 - D-/TX
 	// 2..6 - USR2..USR6
 	// Set USER_OUT to 1 to read from USER_IN.
-	input   [6:0] USER_IN,
-	output  [6:0] USER_OUT,
+	output        USER_OSD,
+	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: per-pin push-pull mask
+	output  [7:0] USER_PP,
+	// [MiSTer-DB9 END]
+	input   [7:0] USER_IN,
+	output  [7:0] USER_OUT,
 
 	input         OSD_STATUS
 );
 
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: USER_PP default
+assign USER_PP = USER_PP_DRIVE;
+// [MiSTer-DB9 END]
 assign HDMI_FREEZE = 1'b0;
 assign HDMI_BOB_DEINT = status[41];
 
 assign ADC_BUS  = 'Z;
+
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper
+wire         CLK_JOY = CLK_50M;                 // Assign clock between 40-50Mhz
+wire   [1:0] joy_type_raw    = status[127:126]; // 0=Off, 1=Saturn, 2=DB9MD, 3=DB15
+wire         joy_2p          = status[125];
+// SNAC cores: replace 1'b0 with the core's SNAC enable expression so SNAC
+// preempts the joydb wrapper on shared USER_IO pins. Default 1'b0 is no-op.
+wire         snac_active     = snacPort1 | snacPort2;
+// MT32-pi cores on primary USER_IO: replace 1'b0 with the core's MT32-active
+// expression (e.g. `mt32_use` under `ifndef SECOND_MT32`, `~mt32_disable` for
+// TRS-80's inverted polarity). Suppresses the OSD-open autodetect probe so it
+// doesn't read the RPi's I2C master traffic as a ghost Saturn signature.
+wire         mt32_primary_active = 1'b0;
+wire   [1:0] joy_type        = snac_active ? 2'd0 : joy_type_raw;
+wire         joy_db9md_en    = (joy_type == 2'd2);
+wire         joy_db15_en     = (joy_type == 2'd3);
+wire         joy_any_en      = |joy_type;
+// Legacy 3-bit alias for fork-specific MT32 / SNAC fallback code. Non-canonical
+// RHS variants (ext_iec_en, mt32_disable) need a hand-port — alias is raw.
+wire   [2:0] JOY_FLAG        = {joy_db9md_en, joy_db15_en, joy_2p};
+// [MiSTer-DB9 END]
+
+// [MiSTer-DB9-Pro BEGIN] - Saturn key gate
+wire         saturn_unlocked;                   // driven by hps_io UIO_DB9_KEY (0xFE)
+// [MiSTer-DB9-Pro END]
+
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joydb wrapper wires + instance
+wire   [7:0] USER_OUT_DRIVE;
+wire   [7:0] USER_PP_DRIVE;
+wire  [15:0] joydb_1, joydb_2;
+wire         joydb_1ena, joydb_2ena;
+wire  [15:0] joy_raw_payload;
+// Programmable-remap matrix (joydb_remap inside joydb): clk_sys carries the
+// 0xFD selector load (HPS-bus domain). joydb_*_mapped are the MiSTer-standard
+// joystick words the core consumes at its joy0_USB merge point. db9_remap_*
+// are driven by the hps_io instance (see the .db9_remap_* bindings there).
+// Until a core consumes joydb_*_mapped (Layer B), the matrix stays at identity
+// and synthesis prunes it -- binding these is dormant + fleet-safe.
+wire  [15:0] joydb_1_mapped, joydb_2_mapped;
+wire         db9_remap_cmd;
+wire   [5:0] db9_remap_byte_cnt;
+wire  [15:0] db9_remap_din;
+
+joydb joydb (
+  .clk             ( CLK_JOY         ),
+  .clk_sys         ( clk_1x             ),
+  .USER_IN         ( USER_IN         ),
+  .OSD_STATUS          ( OSD_STATUS          ),
+  .snac_active         ( snac_active         ),
+  .mt32_primary_active ( mt32_primary_active ),
+  .joy_type        ( joy_type        ),
+  .joy_2p          ( joy_2p          ),
+  .saturn_unlocked ( saturn_unlocked ),
+  .USER_OUT_DRIVE  ( USER_OUT_DRIVE  ),
+  .USER_PP_DRIVE   ( USER_PP_DRIVE   ),
+  .USER_OSD        ( USER_OSD        ),
+  .joydb_1         ( joydb_1         ),
+  .joydb_2         ( joydb_2         ),
+  .joydb_1ena      ( joydb_1ena      ),
+  .joydb_2ena      ( joydb_2ena      ),
+  .remap_cmd       ( db9_remap_cmd      ),
+  .remap_byte_cnt  ( db9_remap_byte_cnt ),
+  .remap_din       ( db9_remap_din      ),
+  .joydb_1_mapped  ( joydb_1_mapped     ),
+  .joydb_2_mapped  ( joydb_2_mapped     ),
+  .joy_raw         ( joy_raw_payload )
+);
+
+// [MiSTer-DB9 END]
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 
 assign AUDIO_S   = 1;
@@ -372,6 +448,11 @@ parameter CONF_STR = {
 	// "P1O[24],Rotate,Off,On;",
 	// "P1O[22],Dithering,On,Off;",
 	// "P1O[8:7],Stereo Mix,None,25%,50%,100%;",
+	// [MiSTer-DB9-Pro BEGIN] - Saturn-first joy_type + 1P/2P selector
+	"O[127:126],UserIO Joystick,Off,Saturn,DB9MD,DB15;",
+	"O[125],UserIO Players, 1 Player,2 Players;",
+	"-;",
+	// [MiSTer-DB9-Pro END]
 	"P2,DIP Switches;",
 	"P2O[96],DIP1 Test,Off,On;",
 	"P2O[97],DIP2 Freeze,Off,On;",
@@ -432,11 +513,24 @@ wire        ee_wr_pulse;                 // MIPS wrote the EEPROM (debounced bel
 reg         ioctl_wait = 0;
 
 wire [19:0] joy;
-wire [19:0] joy_unmod;
 wire [19:0] joy2;
-wire [19:0] joy2_unmod;
-wire [19:0] joy3;
-wire [19:0] joy4;
+// [MiSTer-DB9 BEGIN] - hps_io words renamed to *_USB; the DB9 merge below
+// re-creates joy_unmod / joy2_unmod / joy3 / joy4 from them.
+wire [19:0] joy_unmod_USB;
+wire [19:0] joy2_unmod_USB;
+wire [19:0] joy3_USB;
+wire [19:0] joy4_USB;
+// joydb_*_mapped are MiSTer-standard words out of the programmable remap
+// matrix, whose factory default derives from the loaded MRA's <buttons>.
+// J1 here is 9 buttons, so bits [12:0] (D-pad 3:0, Button1..6, Start, Coin,
+// Pause) are the set a DB9/DB15/Saturn pad can reach; [19:13] stay USB-only.
+wire [19:0] joy_unmod  = joydb_1ena ? (OSD_STATUS ? 20'b0 : {7'b0, joydb_1_mapped[12:0]})
+                       : joy_unmod_USB;
+wire [19:0] joy2_unmod = joydb_2ena ? (OSD_STATUS ? 20'b0 : {7'b0, joydb_2_mapped[12:0]})
+                       : joydb_1ena ? joy_unmod_USB : joy2_unmod_USB;
+wire [19:0] joy3 = joydb_2ena ? joy_unmod_USB  : joydb_1ena ? joy2_unmod_USB : joy3_USB;
+wire [19:0] joy4 = joydb_2ena ? joy2_unmod_USB : joydb_1ena ? joy3_USB       : joy4_USB;
+// [MiSTer-DB9 END]
 
 wire [10:0] ps2_key;
 
@@ -484,10 +578,20 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(4), .BLKSZ(3)) hps_io
 	.buttons(buttons),
 	.forced_scandoubler(forced_scandoubler),
 
-	.joystick_0(joy_unmod),
-	.joystick_1(joy2_unmod),
-	.joystick_2(joy3),
-	.joystick_3(joy4),
+	.joystick_0(joy_unmod_USB),
+	.joystick_1(joy2_unmod_USB),
+	.joystick_2(joy3_USB),
+	.joystick_3(joy4_USB),
+	// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: joy_raw
+	.joy_raw(OSD_STATUS ? joy_raw_payload : 16'b0),
+	// programmable remap matrix selector load (UIO_DB9_MAP 0xFD)
+	.db9_remap_cmd(db9_remap_cmd),
+	.db9_remap_byte_cnt(db9_remap_byte_cnt),
+	.db9_remap_din(db9_remap_din),
+	// [MiSTer-DB9 END]
+	// [MiSTer-DB9-Pro BEGIN] - Saturn key gate
+	.saturn_unlocked(saturn_unlocked),
+	// [MiSTer-DB9-Pro END]
 	.ps2_key(ps2_key),
 
 	.status(status),
@@ -2978,10 +3082,15 @@ psx_snac_input psx_snac_input
 // PSX SNAC pinout from MiSTer-devel/PSX_MiSTer:
 //   OUT0=P2 select, OUT1=P1 select, OUT2=CMD, OUT5=CLK, OUT6=GunCon CSYNC.
 // High releases the open-drain USER_IO line. GunCon DAT and ACK return on IN4/IN3.
+// [MiSTer-DB9 BEGIN] - USER_OUT is 8-bit now (bit 7 idles high on the SNAC arm).
+// The non-SNAC arm falls through to USER_OUT_DRIVE instead of a constant idle so
+// the joydb OSD-open autodetect probe reaches the pins. USER_OUT_DRIVE is 8'hFF
+// while the probe is inactive, so idle/USB gameplay is unchanged.
 assign USER_OUT = (snacPort1 || snacPort2)
-                ? {(snac_gun1 || snac_gun2) ? ~(VGA_HS ^ VGA_VS) : 1'b1,
+                ? {1'b1, (snac_gun1 || snac_gun2) ? ~(VGA_HS ^ VGA_VS) : 1'b1,
                    snac_serial_clk, 2'b11, snac_command,
                    snac_select1_n, snac_select2_n}
-                : 7'h7F;
+                : USER_OUT_DRIVE;
+// [MiSTer-DB9 END]
 
 endmodule

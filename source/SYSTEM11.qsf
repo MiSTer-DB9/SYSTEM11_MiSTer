@@ -315,3 +315,37 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to SD_SPI*
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to USER_IO[*]
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to VGA_EN
 set_global_assignment -name SEED 34
+
+# [MiSTer-DB9 BEGIN] - pinned fitter seed for the DB9/SNAC8 build.
+# Must stay at the END of this file: SEED is single-valued and last-wins, so it
+# has to come after the SEED assignment above (verified with get_global_assignment,
+# which resolves to 5 with this block present).
+#
+# The DB9/SNAC8 block takes the design from 39,056 to ~41,200 of 41,910 ALMs
+# (93% -> 98%). At that density the router only converges by spending hold
+# margin -- Info (188005) reports it reducing hold-fix routing delay to make
+# routing converge -- so which seed is used decides whether the resulting
+# bitstream is usable, not merely whether it routes.
+#
+# Measured at this commit, against a pristine no-DB9 build at the same seed
+# (worst hold +0.118, pll_hdmi setup -1.958, general[1] setup +1.258):
+#
+#   seed  worst hold   pll_hdmi   general[1]   verdict
+#     2      -0.696     -4.179      -1.934     hold + setup violations
+#     3      -1.112     -5.607      -5.854     worse
+#     4      -0.923     -4.325      -4.916     worse
+#     5      +0.235     -2.010      +0.802     no new violation  <-- pinned
+#    34         n/a        n/a         n/a     fails to route entirely
+#
+# The residual pll_hdmi -2.010 is upstream's own pre-existing failure (-1.958
+# without any DB9 code), not something this port introduces.
+#
+# Pinning matters for CI as well as locally: quartus_build.sh's fit-retry loop
+# reseeds only on a FAILED fit and takes the first seed that produces an RBF,
+# without checking timing -- it would happily ship seed 2. Pinning a good seed
+# here means attempt 0 succeeds and that loop never runs.
+#
+# If an upstream merge shifts the netlist, re-verify this seed: a stale pin
+# still builds green, since STA cannot see fitter-variance breakage.
+set_global_assignment -name SEED 5
+# [MiSTer-DB9 END]
